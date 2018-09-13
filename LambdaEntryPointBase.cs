@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
+using Amazon.Lambda;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.AspNetCoreServer;
+using Amazon.Lambda.Model;
 using MhLabs.Logging;
 using Microsoft.AspNetCore.Hosting;
 using Newtonsoft.Json;
@@ -15,8 +18,17 @@ namespace MhLabs.APIGatewayLambdaProxy
     public abstract class LambdaEntryPointBase : APIGatewayProxyFunction
     {
         protected const string CorrelationIdHeader = "mh-correlation-id";
+        private const string Concurrency = "__CONCURRENCY__";
+        private const string KeepAliveInvocation = "__KEEP_ALIVE_INVOCATION__";
+        private readonly IAmazonLambda _lambda;
+
         private static bool Warm { get; set; }
         private static string _correlationId;
+
+        public LambdaEntryPointBase() : base()
+        {
+            _lambda = new AmazonLambdaClient();
+        }
 
         protected abstract IWebHostBuilder Initialize(IWebHostBuilder builder);
 
@@ -38,8 +50,34 @@ namespace MhLabs.APIGatewayLambdaProxy
 
         public override async Task<APIGatewayProxyResponse> FunctionHandlerAsync(Amazon.Lambda.APIGatewayEvents.APIGatewayProxyRequest request, Amazon.Lambda.Core.ILambdaContext lambdaContext)
         {
-            if (string.IsNullOrEmpty(request.HttpMethod))
+            if (string.IsNullOrEmpty(request.HttpMethod)) // For backward compatability
             {
+                var concurrency = 1;
+
+                if (request.Headers != null)
+                {
+                    if (request.Headers.ContainsKey(Concurrency))
+                    {
+                        concurrency = int.Parse(request.Headers[Concurrency]);
+                        var tasks = new List<Task<InvokeResponse>>();
+                        for (var i = 0; i < concurrency - 1; i++)
+                        {
+                            var invokeRequest = new InvokeRequest
+                            {
+                                FunctionName = System.Environment.GetEnvironmentVariable("AWS_LAMBDA_FUNCTION_NAME"),
+                                Payload = "{\"Headers\":{\"" + KeepAliveInvocation + "\": \"1\"}}"
+                            };
+                            tasks.Add(_lambda.InvokeAsync(invokeRequest));
+                        }
+
+                        Task.WaitAll(tasks.ToArray());
+                    }
+                    if (request.Headers.ContainsKey(KeepAliveInvocation)) {
+                        Thread.Sleep(75); // To mitigate lambda reuse
+                    }
+                }
+
+                lambdaContext.Logger.Log(JsonConvert.SerializeObject(request));
                 if (Warm)
                 {
                     lambdaContext.Logger.Log("ping");
