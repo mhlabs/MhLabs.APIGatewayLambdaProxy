@@ -9,6 +9,7 @@ using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.AspNetCoreServer;
 using Amazon.Lambda.Model;
 using MhLabs.Logging;
+using MhLabs.SerilogExtensions;
 using Microsoft.AspNetCore.Hosting;
 using Newtonsoft.Json;
 using Serilog;
@@ -43,6 +44,7 @@ namespace MhLabs.APIGatewayLambdaProxy
                     .Enrich.With<ExceptionEnricher>()
                     .Enrich.With<CorrelationIdEnrichment>()
                     .Enrich.With<XRayEnrichment>()
+                    .Enrich.With<RequestBodyEnrichment>()
                     .WriteTo.Console(outputTemplate: "[{Level:u3}] [{Properties:j}] {Message:lj}{Exception}{NewLine}");
                 })
                 .UseApiGateway();
@@ -97,6 +99,7 @@ namespace MhLabs.APIGatewayLambdaProxy
                 Console.WriteLine(JsonConvert.SerializeObject(request));
                 LogValueResolver.Register<MemberIdEnrichment>(() => request.RequestContext.Authorizer.Claims["custom:memberid"]);
                 LogValueResolver.Register<CorrelationIdEnrichment>(() => _correlationId);
+                LogValueResolver.Register<RequestBodyEnrichment>(() => request.Body);
             }
             Warm = true;
             return await base.FunctionHandlerAsync(request, lambdaContext);
