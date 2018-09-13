@@ -8,7 +8,6 @@ using Amazon.Lambda;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.AspNetCoreServer;
 using Amazon.Lambda.Model;
-using MhLabs.Logging;
 using MhLabs.SerilogExtensions;
 using Microsoft.AspNetCore.Hosting;
 using Newtonsoft.Json;
