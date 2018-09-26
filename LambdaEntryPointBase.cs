@@ -69,7 +69,7 @@ namespace MhLabs.APIGatewayLambdaProxy
                             tasks.Add(_lambda.InvokeAsync(invokeRequest));
                         }
 
-                        Task.WaitAll(tasks.ToArray());
+                        await Task.WhenAll(tasks);
                     }
                     if (request.Headers.ContainsKey(KeepAliveInvocation)) {
                         Thread.Sleep(75); // To mitigate lambda reuse
