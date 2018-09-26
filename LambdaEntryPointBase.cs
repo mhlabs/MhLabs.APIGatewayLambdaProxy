@@ -51,15 +51,13 @@ namespace MhLabs.APIGatewayLambdaProxy
 
         public override async Task<APIGatewayProxyResponse> FunctionHandlerAsync(Amazon.Lambda.APIGatewayEvents.APIGatewayProxyRequest request, Amazon.Lambda.Core.ILambdaContext lambdaContext)
         {
-            if (string.IsNullOrEmpty(request.HttpMethod)) // For backward compatability
+            if (string.IsNullOrEmpty(request.HttpMethod)) // For backward compability
             {
-                var concurrency = 1;
-
                 if (request.Headers != null)
                 {
                     if (request.Headers.ContainsKey(Concurrency))
                     {
-                        concurrency = int.Parse(request.Headers[Concurrency]);
+                        var concurrency = int.Parse(request.Headers[Concurrency]);
                         var tasks = new List<Task<InvokeResponse>>();
                         for (var i = 0; i < concurrency - 1; i++)
                         {
@@ -106,14 +104,14 @@ namespace MhLabs.APIGatewayLambdaProxy
 
         private static void SetCorrelationId(APIGatewayProxyRequest request)
         {
-            if (request.Headers.ContainsKey(CorrelationIdHeader) && !string.IsNullOrEmpty(request.Headers[CorrelationIdHeader]))
-            {
-                _correlationId = request.Headers[CorrelationIdHeader];
-            }
-            else
-            {
-                _correlationId = Guid.NewGuid().ToString();
-            }
+            _correlationId = HasCorrelationIdHeader(request)
+                ? request.Headers[CorrelationIdHeader]
+                : Guid.NewGuid().ToString();
+        }
+
+        private static bool HasCorrelationIdHeader(APIGatewayProxyRequest request)
+        {
+            return request.Headers.ContainsKey(CorrelationIdHeader) && !string.IsNullOrEmpty(request.Headers[CorrelationIdHeader]);
         }
     }
 }
