@@ -44,12 +44,12 @@ namespace MhLabs.APIGatewayLambdaProxy
                     .Enrich.With<CorrelationIdEnrichment>()
                     .Enrich.With<XRayEnrichment>()
                     .Enrich.With<RequestBodyEnrichment>()
-                    .WriteTo.Console(outputTemplate: "[{Level:u3}] [{Properties:j}] {Message:lj}{Exception}{NewLine}");
+                    .WriteTo.Console(outputTemplate: Constants.OutputTemplateFormat);
                 })
                 .UseApiGateway();
         }
 
-        public override async Task<APIGatewayProxyResponse> FunctionHandlerAsync(Amazon.Lambda.APIGatewayEvents.APIGatewayProxyRequest request, Amazon.Lambda.Core.ILambdaContext lambdaContext)
+        public override async Task<APIGatewayProxyResponse> FunctionHandlerAsync(APIGatewayProxyRequest request, Amazon.Lambda.Core.ILambdaContext lambdaContext)
         {
             if (string.IsNullOrEmpty(request.HttpMethod)) // For backward compability
             {
@@ -59,24 +59,22 @@ namespace MhLabs.APIGatewayLambdaProxy
                     {
                         var concurrency = int.Parse(request.Headers[Concurrency]);
                         var tasks = new List<Task<InvokeResponse>>();
+
                         for (var i = 0; i < concurrency - 1; i++)
                         {
-                            var invokeRequest = new InvokeRequest
-                            {
-                                FunctionName = System.Environment.GetEnvironmentVariable("AWS_LAMBDA_FUNCTION_NAME"),
-                                Payload = "{\"Headers\":{\"" + KeepAliveInvocation + "\": \"1\"}}"
-                            };
-                            tasks.Add(_lambda.InvokeAsync(invokeRequest));
+                            tasks.Add(_lambda.InvokeAsync(CreateInvokeRequest()));
                         }
 
                         await Task.WhenAll(tasks);
                     }
-                    if (request.Headers.ContainsKey(KeepAliveInvocation)) {
+                    if (request.Headers.ContainsKey(KeepAliveInvocation)) 
+                    {
                         Thread.Sleep(75); // To mitigate lambda reuse
                     }
                 }
 
                 lambdaContext.Logger.Log(JsonConvert.SerializeObject(request));
+                
                 if (Warm)
                 {
                     lambdaContext.Logger.Log("ping");
@@ -98,8 +96,19 @@ namespace MhLabs.APIGatewayLambdaProxy
                 LogValueResolver.Register<CorrelationIdEnrichment>(() => _correlationId);
                 LogValueResolver.Register<RequestBodyEnrichment>(() => request.Body);
             }
+
             Warm = true;
+
             return await base.FunctionHandlerAsync(request, lambdaContext);
+        }
+
+        private static InvokeRequest CreateInvokeRequest()
+        {
+            return new InvokeRequest
+            {
+                FunctionName = System.Environment.GetEnvironmentVariable("AWS_LAMBDA_FUNCTION_NAME"),
+                Payload = "{\"Headers\":{\"" + KeepAliveInvocation + "\": \"1\"}}"
+            };
         }
 
         private static void SetCorrelationId(APIGatewayProxyRequest request)
