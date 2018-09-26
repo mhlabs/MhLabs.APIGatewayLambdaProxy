@@ -43,7 +43,6 @@ namespace MhLabs.APIGatewayLambdaProxy
                     .Enrich.With<ExceptionEnricher>()
                     .Enrich.With<CorrelationIdEnrichment>()
                     .Enrich.With<XRayEnrichment>()
-                    .Enrich.With<RequestBodyEnrichment>()
                     .WriteTo.Console(outputTemplate: "[{Level:u3}] [{Properties:j}] {Message:lj}{Exception}{NewLine}");
                 })
                 .UseApiGateway();
