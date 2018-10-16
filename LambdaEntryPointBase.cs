@@ -23,6 +23,7 @@ namespace MhLabs.APIGatewayLambdaProxy
         protected const string CorrelationIdHeader = "mh-correlation-id";
         private const string Concurrency = "__CONCURRENCY__";
         private const string KeepAliveInvocation = "__KEEP_ALIVE_INVOCATION__";
+        private const string PreTrafficInvocation = "__PRE_TRAFFIC_INVOCATION__";
         private readonly IAmazonLambda _lambda;
 
         private readonly IAmazonCodeDeploy _codeDeploy;
@@ -67,7 +68,7 @@ namespace MhLabs.APIGatewayLambdaProxy
 
                         for (var i = 0; i < concurrency - 1; i++)
                         {
-                            tasks.Add(_lambda.InvokeAsync(CreateInvokeRequest()));
+                            tasks.Add(_lambda.InvokeAsync(CreateInvokeRequest(KeepAliveInvocation)));
                         }
 
                         await Task.WhenAll(tasks);
@@ -112,7 +113,7 @@ namespace MhLabs.APIGatewayLambdaProxy
         public async Task PreTrafficFunction(PreTrafficHookEvent input, Amazon.Lambda.Core.ILambdaContext lambdaContext)
         {
             var lambdaArn = System.Environment.GetEnvironmentVariable("LambdaArn");
-            await _lambda.InvokeAsync(CreateInvokeRequest());
+            await _lambda.InvokeAsync(CreateInvokeRequest(PreTrafficInvocation, "live"));
             var request = new PutLifecycleEventHookExecutionStatusRequest
             {
                 DeploymentId = input.DeploymentId,
@@ -123,12 +124,13 @@ namespace MhLabs.APIGatewayLambdaProxy
             await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
         }
 
-        private static InvokeRequest CreateInvokeRequest()
+        private static InvokeRequest CreateInvokeRequest(string invocationType, string qualifier = null)
         {
             return new InvokeRequest
             {
                 FunctionName = System.Environment.GetEnvironmentVariable("AWS_LAMBDA_FUNCTION_NAME"),
-                Payload = "{\"Headers\":{\"" + KeepAliveInvocation + "\": \"1\"}}"
+                Qualifier = qualifier,
+                Payload = "{\"Headers\":{\"" + invocationType + "\": \"1\"}}"
             };
         }
 
