@@ -4,9 +4,12 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Amazon.CodeDeploy;
+using Amazon.CodeDeploy.Model;
 using Amazon.Lambda;
 using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.AspNetCoreServer;
+using Amazon.Lambda.Core;
 using Amazon.Lambda.Model;
 using MhLabs.SerilogExtensions;
 using Microsoft.AspNetCore.Hosting;
@@ -22,12 +25,15 @@ namespace MhLabs.APIGatewayLambdaProxy
         private const string KeepAliveInvocation = "__KEEP_ALIVE_INVOCATION__";
         private readonly IAmazonLambda _lambda;
 
+        private readonly IAmazonCodeDeploy _codeDeploy;
+
         private static bool Warm { get; set; }
         private static string _correlationId;
 
         public LambdaEntryPointBase() : base()
         {
             _lambda = new AmazonLambdaClient();
+            _codeDeploy = new AmazonCodeDeployClient();
         }
 
         protected abstract IWebHostBuilder Initialize(IWebHostBuilder builder);
@@ -66,14 +72,14 @@ namespace MhLabs.APIGatewayLambdaProxy
 
                         await Task.WhenAll(tasks);
                     }
-                    if (request.Headers.ContainsKey(KeepAliveInvocation)) 
+                    if (request.Headers.ContainsKey(KeepAliveInvocation))
                     {
                         Thread.Sleep(75); // To mitigate lambda reuse
                     }
                 }
 
                 lambdaContext.Logger.Log(JsonConvert.SerializeObject(request));
-                
+
                 if (Warm)
                 {
                     lambdaContext.Logger.Log("ping");
@@ -99,6 +105,22 @@ namespace MhLabs.APIGatewayLambdaProxy
             Warm = true;
 
             return await base.FunctionHandlerAsync(request, lambdaContext);
+        }
+
+
+        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
+        public async Task PreTrafficFunction(PreTrafficHookEvent input, Amazon.Lambda.Core.ILambdaContext lambdaContext)
+        {
+            var lambdaArn = System.Environment.GetEnvironmentVariable("LambdaArn");
+            await _lambda.InvokeAsync(CreateInvokeRequest());
+            var request = new PutLifecycleEventHookExecutionStatusRequest
+            {
+                DeploymentId = input.DeploymentId,
+                LifecycleEventHookExecutionId = input.LifecycleEventHookExecutionId,
+                Status = "Succeeded"
+            };
+
+            await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
         }
 
         private static InvokeRequest CreateInvokeRequest()
