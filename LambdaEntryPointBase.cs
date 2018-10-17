@@ -113,23 +113,32 @@ namespace MhLabs.APIGatewayLambdaProxy
         public async Task PreTrafficFunction(PreTrafficHookEvent input, Amazon.Lambda.Core.ILambdaContext lambdaContext)
         {
             var lambdaArn = System.Environment.GetEnvironmentVariable("LambdaArn");
-            await _lambda.InvokeAsync(CreateInvokeRequest(PreTrafficInvocation, "live"));
             var request = new PutLifecycleEventHookExecutionStatusRequest
             {
                 DeploymentId = input.DeploymentId,
                 LifecycleEventHookExecutionId = input.LifecycleEventHookExecutionId,
                 Status = "Succeeded"
             };
-
-            await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
+            try
+            {
+                await _lambda.InvokeAsync(CreateInvokeRequest(PreTrafficInvocation));
+            }
+            catch(Exception ex) 
+            {
+                lambdaContext.Logger.Log(ex.Message + " "  + ex.StackTrace);
+                request.Status = "Failed";
+            }
+            finally
+            {
+                await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
+            }
         }
 
-        private static InvokeRequest CreateInvokeRequest(string invocationType, string qualifier = null)
+        private static InvokeRequest CreateInvokeRequest(string invocationType)
         {
             return new InvokeRequest
             {
-                FunctionName = System.Environment.GetEnvironmentVariable("AWS_LAMBDA_FUNCTION_NAME"),
-                Qualifier = qualifier,
+                FunctionName = System.Environment.GetEnvironmentVariable("LambdaToInvoke") ?? System.Environment.GetEnvironmentVariable("AWS_LAMBDA_FUNCTION_NAME"),
                 Payload = "{\"Headers\":{\"" + invocationType + "\": \"1\"}}"
             };
         }
