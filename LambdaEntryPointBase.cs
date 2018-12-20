@@ -13,6 +13,7 @@ using Amazon.Lambda.Core;
 using Amazon.Lambda.Model;
 using MhLabs.SerilogExtensions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Features;
 using Newtonsoft.Json;
 using Serilog;
 
@@ -31,6 +32,7 @@ namespace MhLabs.APIGatewayLambdaProxy
         private static bool Warm { get; set; }
         private static string _correlationId;
 
+        protected virtual int PreTrafficConcurrency { get; set; } = 1;
         public LambdaEntryPointBase() : base()
         {
             _lambda = new AmazonLambdaClient();
@@ -42,18 +44,29 @@ namespace MhLabs.APIGatewayLambdaProxy
         protected virtual void UseCorrelationId(string correlationId) { }
         protected override void Init(IWebHostBuilder builder)
         {
-            Initialize(builder)
-                .UseSerilog((hostingContext, loggerConfiguration) =>
-                {
-                    loggerConfiguration
-                    .Enrich.With<MemberIdEnrichment>()
-                    .Enrich.With<ExceptionEnricher>()
-                    .Enrich.With<CorrelationIdEnrichment>()
-                    .Enrich.With<XRayEnrichment>()
-                    .WriteTo.Console(outputTemplate: Constants.OutputTemplateFormat);
-                })
+            if (string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("PRE_HOOK_TRIGGER")))
+            {
+                Console.WriteLine(System.Environment.GetEnvironmentVariable("PRE_HOOK_TRIGGER"));
+                Initialize(builder)
+                    .UseSerilog((hostingContext, loggerConfiguration) =>
+                    {
+                        loggerConfiguration
+                        .Enrich.With<MemberIdEnrichment>()
+                        .Enrich.With<ExceptionEnricher>()
+                        .Enrich.With<CorrelationIdEnrichment>()
+                        .Enrich.With<XRayEnrichment>()
+                        .WriteTo.Console(outputTemplate: Constants.OutputTemplateFormat);
+                    })
+                    .UseApiGateway();
+            }
+            else
+            {
+                builder
+                .UseContentRoot(Directory.GetCurrentDirectory())
+                .UseStartup<MockStartup>()
                 .UseApiGateway();
-        }
+            }
+        }        
 
         public override async Task<APIGatewayProxyResponse> FunctionHandlerAsync(APIGatewayProxyRequest request, Amazon.Lambda.Core.ILambdaContext lambdaContext)
         {
@@ -64,14 +77,7 @@ namespace MhLabs.APIGatewayLambdaProxy
                     if (request.Headers.ContainsKey(Concurrency))
                     {
                         var concurrency = int.Parse(request.Headers[Concurrency]);
-                        var tasks = new List<Task<InvokeResponse>>();
-
-                        for (var i = 0; i < concurrency - 1; i++)
-                        {
-                            tasks.Add(_lambda.InvokeAsync(CreateInvokeRequest(KeepAliveInvocation)));
-                        }
-
-                        await Task.WhenAll(tasks);
+                        await KeepAlive(concurrency - 1, KeepAliveInvocation);
                     }
                     if (request.Headers.ContainsKey(KeepAliveInvocation))
                     {
@@ -108,6 +114,18 @@ namespace MhLabs.APIGatewayLambdaProxy
             return await base.FunctionHandlerAsync(request, lambdaContext);
         }
 
+        private async Task KeepAlive(int concurrency, string invocationType)
+        {
+            var tasks = new List<Task<InvokeResponse>>();
+            LambdaLogger.Log("Concurrency " + concurrency);
+            for (var i = 0; i < concurrency; i++)
+            {
+                LambdaLogger.Log("Invoke " + i);
+                tasks.Add(_lambda.InvokeAsync(CreateInvokeRequest(invocationType)));
+            }
+
+            await Task.WhenAll(tasks);
+        }
 
         [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
         public async Task PreTrafficFunction(PreTrafficHookEvent input, Amazon.Lambda.Core.ILambdaContext lambdaContext)
@@ -121,11 +139,11 @@ namespace MhLabs.APIGatewayLambdaProxy
             };
             try
             {
-                await _lambda.InvokeAsync(CreateInvokeRequest(PreTrafficInvocation));
+                await KeepAlive(PreTrafficConcurrency, PreTrafficInvocation);
             }
-            catch(Exception ex) 
+            catch (Exception ex)
             {
-                lambdaContext.Logger.Log(ex.Message + " "  + ex.StackTrace);
+                lambdaContext.Logger.Log(ex.Message + " " + ex.StackTrace);
                 request.Status = "Failed";
             }
             finally
