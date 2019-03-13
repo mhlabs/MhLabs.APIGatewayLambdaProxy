@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Amazon.CodeDeploy;
@@ -10,11 +13,11 @@ using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.AspNetCoreServer;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.Model;
-using MhLabs.SerilogExtensions;
+using MhLabs.AwsSignedHttpClient;
+using MhLabs.Extensions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Features;
 using Newtonsoft.Json;
-using Serilog;
 
 namespace MhLabs.APIGatewayLambdaProxy
 {
@@ -23,58 +26,43 @@ namespace MhLabs.APIGatewayLambdaProxy
         private const string Concurrency = "__CONCURRENCY__";
         private const string KeepAliveInvocation = "__KEEP_ALIVE_INVOCATION__";
         private const string PreTrafficInvocation = "__PRE_TRAFFIC_INVOCATION__";
-        private readonly IAmazonLambda _lambda;
+        private IAmazonLambda _lambda;
 
-        private readonly IAmazonCodeDeploy _codeDeploy;
+        private IAmazonCodeDeploy _codeDeploy;
+        private HttpClient _httpClient;
 
         private static bool Warm { get; set; }
 
         protected virtual int PreTrafficConcurrency { get; set; } = 1;
-        protected LambdaEntryPointBase() : base()
+        protected LambdaEntryPointBase() : base(string.IsNullOrEmpty(
+            System.Environment.GetEnvironmentVariable("PRE_HOOK_TRIGGER"))
+            ? AspNetCoreStartupMode.Constructor
+            : AspNetCoreStartupMode.FirstRequest)
         {
-            _lambda = new AmazonLambdaClient();
-            _codeDeploy = new AmazonCodeDeployClient();
         }
 
-        protected abstract IWebHostBuilder Initialize(IWebHostBuilder builder);
+        // For backward compatibility
+        [Obsolete("Use Init()")]
+        protected virtual IWebHostBuilder Initialize(IWebHostBuilder builder)
+        {
+            return builder;
+        }
         protected virtual void UseCorrelationId(string correlationId) { }
         protected override void Init(IWebHostBuilder builder)
         {
-            if (string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("PRE_HOOK_TRIGGER")))
-            {
-                Console.WriteLine(System.Environment.GetEnvironmentVariable("PRE_HOOK_TRIGGER"));
-                Initialize(builder)
-                    .UseSerilog((hostingContext, loggerConfiguration) =>
-                    {
-                        loggerConfiguration
-                        .Enrich.With<MemberIdEnrichment>()
-                        .Enrich.With<ExceptionEnricher>()
-                        .Enrich.With<CorrelationIdEnrichment>()
-                        .Enrich.With<XRayEnrichment>()
-                        .WriteTo.Console(outputTemplate: Constants.OutputTemplateFormat);
-                    })
-                    .UseApiGateway();
-            }
-            else
-            {
-                builder
-                .UseContentRoot(Directory.GetCurrentDirectory())
-                .UseStartup<MockStartup>()
-                .UseApiGateway();
-            }
+            Initialize(builder);
         }
-
 
         protected override void PostCreateContext(Microsoft.AspNetCore.Hosting.Internal.HostingApplication.Context context, APIGatewayProxyRequest apiGatewayRequest, ILambdaContext lambdaContext)
         {
-            var cts = new CancellationTokenSource();            
+            var cts = new CancellationTokenSource();
             cts.CancelAfter((int)(lambdaContext.RemainingTime.TotalMilliseconds * 0.75));
             context.HttpContext.RequestAborted = cts.Token;
         }
-        
+
         public override async Task<APIGatewayProxyResponse> FunctionHandlerAsync(APIGatewayProxyRequest request, ILambdaContext lambdaContext)
         {
-            if (string.IsNullOrEmpty(request.HttpMethod)) // For backward compability
+            if (string.IsNullOrEmpty(request.HttpMethod)) // For backward compatibility
             {
                 if (request.Headers != null)
                 {
@@ -86,6 +74,10 @@ namespace MhLabs.APIGatewayLambdaProxy
                     if (request.Headers.ContainsKey(KeepAliveInvocation))
                     {
                         Thread.Sleep(75); // To mitigate lambda reuse
+                    }
+                    if (!Warm && !request.Headers.Keys.Any(key => key == Concurrency || key == KeepAliveInvocation))
+                    {
+                        LambdaLogger.Log($"[Info] Customer affected by coldstart");
                     }
                 }
 
@@ -101,7 +93,7 @@ namespace MhLabs.APIGatewayLambdaProxy
                 request.Path = "/ping";
                 request.Headers = new Dictionary<string, string> { { "Host", "localhost" } };
                 request.RequestContext = new APIGatewayProxyRequest.ProxyRequestContext();
-                lambdaContext.Logger.LogLine("Keep-alive invokation");
+                lambdaContext.Logger.LogLine("Keep-alive invocation");
             }
 
             Warm = true;
@@ -121,29 +113,92 @@ namespace MhLabs.APIGatewayLambdaProxy
             await Task.WhenAll(tasks);
         }
 
-        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
-        public async Task PreTrafficFunction(PreTrafficHookEvent input, Amazon.Lambda.Core.ILambdaContext lambdaContext)
+        private void InitHooks()
         {
-            var lambdaArn = System.Environment.GetEnvironmentVariable("LambdaArn");
+            _lambda = _lambda ?? new AmazonLambdaClient();
+            _codeDeploy = _codeDeploy ?? new AmazonCodeDeployClient();
+            _httpClient = _httpClient ?? new HttpClient(new AwsSignedHttpMessageHandler { InnerHandler = new HttpClientHandler() }) { BaseAddress = Env.Get("ApiBaseUrl").ToUri() };
+        }
+
+        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
+        public async Task PreTrafficHook(CodeDeployEvent deployment)
+        {
+            InitHooks();
+            Console.WriteLine("PreHook. Version " + Env.Get("AWS_LAMBDA_FUNCTION_VERSION"));
+            var status = "Succeeded";
+            var tests = File.ReadAllText("smoketests.json").To<List<SmokeTest>>();
+            foreach (var test in tests)
+            {
+                if (!test.NoProxy) {
+                    var splitPath = test.Path.Trim('/').Split('/');
+                    test.Path = string.Join("/", splitPath.Skip(1));
+                    Console.WriteLine("Path " + test.Path);
+                }
+                var apiRequest = new APIGatewayProxyRequest
+                {
+                    Path = test.Path,
+                    HttpMethod = test.Method,
+                    Headers = new Dictionary<string, string> { { "Host", "localhost" }, { "__PRE_TRAFFIC_HOOK__", "true" } }
+                };
+                var lambdaRequest = new InvokeRequest
+                {
+                    FunctionName = Env.Get("VersionToTest"),
+                    Payload = apiRequest.ToJson()
+                };
+                var response = await _lambda.InvokeAsync(lambdaRequest);
+
+                using (var reader = new StreamReader(response.Payload))
+                {
+                    var responseStr = reader.ReadToEnd();
+                    Console.WriteLine("Response: " + responseStr);
+                    var regex = new Regex(test.ResponsePattern);
+                    if (!regex.IsMatch(responseStr))
+                    {
+                        status = "Failed";
+                    }
+                }
+            }
             var request = new PutLifecycleEventHookExecutionStatusRequest
             {
-                DeploymentId = input.DeploymentId,
-                LifecycleEventHookExecutionId = input.LifecycleEventHookExecutionId,
-                Status = "Succeeded"
+                DeploymentId = deployment.DeploymentId,
+                LifecycleEventHookExecutionId = deployment.LifecycleEventHookExecutionId,
+                Status = status
             };
-            try
+
+            await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
+        }
+
+        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
+        public async Task PostTrafficHook(CodeDeployEvent deployment)
+        {
+            InitHooks();
+            Console.WriteLine("PostHook. Version " + Env.Get("AWS_LAMBDA_FUNCTION_VERSION"));
+            var status = "Succeeded";
+            var tests = File.ReadAllText("smoketests.json").To<List<SmokeTest>>();
+            foreach (var test in tests)
             {
-                await KeepAlive(PreTrafficConcurrency, PreTrafficInvocation);
+                var httpRequest = new HttpRequestMessage(new HttpMethod(test.Method), test.Path);
+                if (!string.IsNullOrEmpty(test.Body))
+                {
+                    httpRequest.Content = new StringContent(test.Body);
+                }
+                var response = await _httpClient.SendAsync(httpRequest);
+                var responseStr = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Response: " + responseStr);
+                var regex = new Regex(test.ResponsePattern);
+                if (!regex.IsMatch(responseStr))
+                {
+                    status = "Failed";
+                }
             }
-            catch (Exception ex)
+            var request = new PutLifecycleEventHookExecutionStatusRequest
             {
-                lambdaContext.Logger.Log(ex.Message + " " + ex.StackTrace);
-                request.Status = "Failed";
-            }
-            finally
-            {
-                await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
-            }
+                DeploymentId = deployment.DeploymentId,
+                LifecycleEventHookExecutionId = deployment.LifecycleEventHookExecutionId,
+                Status = status
+            };
+
+            await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
         }
 
         private static InvokeRequest CreateInvokeRequest(string invocationType)
@@ -155,4 +210,5 @@ namespace MhLabs.APIGatewayLambdaProxy
             };
         }
     }
+
 }
