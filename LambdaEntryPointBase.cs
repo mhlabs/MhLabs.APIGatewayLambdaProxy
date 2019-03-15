@@ -123,41 +123,51 @@ namespace MhLabs.APIGatewayLambdaProxy
         [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
         public async Task PreTrafficHook(CodeDeployEvent deployment)
         {
+            var status = LifecycleEventStatus.Succeeded;
             InitHooks();
-            Console.WriteLine("PreHook. Version " + Env.Get("AWS_LAMBDA_FUNCTION_VERSION"));
-            var status = "Succeeded";
-            var tests = File.ReadAllText("smoketests.json").To<List<SmokeTest>>();
-            foreach (var test in tests)
+            try
             {
-                if (!test.NoProxy) {
-                    var splitPath = test.Path.Trim('/').Split('/');
-                    test.Path = string.Join("/", splitPath.Skip(1));
-                    Console.WriteLine("Path " + test.Path);
-                }
-                var apiRequest = new APIGatewayProxyRequest
+                Console.WriteLine("PreHook. Version " + Env.Get("AWS_LAMBDA_FUNCTION_VERSION"));
+                var tests = File.ReadAllText("smoketests.json").To<List<SmokeTest>>();
+                foreach (var test in tests)
                 {
-                    Path = test.Path,
-                    HttpMethod = test.Method,
-                    Headers = new Dictionary<string, string> { { "Host", "localhost" }, { "__PRE_TRAFFIC_HOOK__", "true" } }
-                };
-                var lambdaRequest = new InvokeRequest
-                {
-                    FunctionName = Env.Get("VersionToTest"),
-                    Payload = apiRequest.ToJson()
-                };
-                var response = await _lambda.InvokeAsync(lambdaRequest);
-
-                using (var reader = new StreamReader(response.Payload))
-                {
-                    var responseStr = reader.ReadToEnd();
-                    Console.WriteLine("Response: " + responseStr);
-                    var regex = new Regex(test.ResponsePattern);
-                    if (!regex.IsMatch(responseStr))
+                    if (!test.NoProxy)
                     {
-                        status = "Failed";
+                        var splitPath = test.Path.Trim('/').Split('/');
+                        test.Path = string.Join("/", splitPath.Skip(1));
+                        Console.WriteLine("Path " + test.Path);
+                    }
+                    var apiRequest = new APIGatewayProxyRequest
+                    {
+                        Path = test.Path,
+                        HttpMethod = test.Method,
+                        Headers = new Dictionary<string, string> { { "Host", "localhost" }, { "__PRE_TRAFFIC_HOOK__", "true" } }
+                    };
+                    var lambdaRequest = new InvokeRequest
+                    {
+                        FunctionName = Env.Get("VersionToTest"),
+                        Payload = apiRequest.ToJson()
+                    };
+                    var response = await _lambda.InvokeAsync(lambdaRequest);
+
+                    using (var reader = new StreamReader(response.Payload))
+                    {
+                        var responseStr = reader.ReadToEnd();
+                        Console.WriteLine("Response: " + responseStr);
+                        var regex = new Regex(test.ResponsePattern);
+                        if (!regex.IsMatch(responseStr))
+                        {
+                            status = LifecycleEventStatus.Failed; ;
+                        }
                     }
                 }
             }
+            catch (Exception ex)
+            {
+                status = LifecycleEventStatus.Failed;
+                Console.WriteLine(ex.Message + " " + ex.StackTrace);
+            }
+
             var request = new PutLifecycleEventHookExecutionStatusRequest
             {
                 DeploymentId = deployment.DeploymentId,
@@ -171,25 +181,34 @@ namespace MhLabs.APIGatewayLambdaProxy
         [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
         public async Task PostTrafficHook(CodeDeployEvent deployment)
         {
-            InitHooks();
-            Console.WriteLine("PostHook. Version " + Env.Get("AWS_LAMBDA_FUNCTION_VERSION"));
-            var status = "Succeeded";
-            var tests = File.ReadAllText("smoketests.json").To<List<SmokeTest>>();
-            foreach (var test in tests)
+            var status = LifecycleEventStatus.Succeeded;
+
+            try
             {
-                var httpRequest = new HttpRequestMessage(new HttpMethod(test.Method), test.Path);
-                if (!string.IsNullOrEmpty(test.Body))
+                InitHooks();
+                Console.WriteLine("PostHook. Version " + Env.Get("AWS_LAMBDA_FUNCTION_VERSION"));
+                var tests = File.ReadAllText("smoketests.json").To<List<SmokeTest>>();
+                foreach (var test in tests)
                 {
-                    httpRequest.Content = new StringContent(test.Body);
+                    var httpRequest = new HttpRequestMessage(new HttpMethod(test.Method), test.Path);
+                    if (!string.IsNullOrEmpty(test.Body))
+                    {
+                        httpRequest.Content = new StringContent(test.Body);
+                    }
+                    var response = await _httpClient.SendAsync(httpRequest);
+                    var responseStr = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine("Response: " + responseStr);
+                    var regex = new Regex(test.ResponsePattern);
+                    if (!regex.IsMatch(responseStr))
+                    {
+                        status = LifecycleEventStatus.Failed;
+                    }
                 }
-                var response = await _httpClient.SendAsync(httpRequest);
-                var responseStr = await response.Content.ReadAsStringAsync();
-                Console.WriteLine("Response: " + responseStr);
-                var regex = new Regex(test.ResponsePattern);
-                if (!regex.IsMatch(responseStr))
-                {
-                    status = "Failed";
-                }
+            }
+            catch (Exception ex)
+            {
+                status = LifecycleEventStatus.Failed;
+                Console.WriteLine(ex.Message + " " + ex.StackTrace);
             }
             var request = new PutLifecycleEventHookExecutionStatusRequest
             {
