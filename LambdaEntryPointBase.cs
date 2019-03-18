@@ -100,6 +100,19 @@ namespace MhLabs.APIGatewayLambdaProxy
             return await base.FunctionHandlerAsync(request, lambdaContext);
         }
 
+        protected static void ApplyCorrelationId(APIGatewayProxyRequest request)
+        {
+            var correlationId = string.Empty;
+
+            if (!request.Headers.ContainsKey(CorrelationHelper.CorrelationIdHeader))
+            {
+                correlationId = Guid.NewGuid().ToString();
+                request.Headers[CorrelationHelper.CorrelationIdHeader] = correlationId;
+            }
+
+            CorrelationHelper.CorrelationId = correlationId;
+        }
+
         private async Task KeepAlive(int concurrency, string invocationType)
         {
             var tasks = new List<Task<InvokeResponse>>();
