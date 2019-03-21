@@ -115,6 +115,7 @@ namespace MhLabs.APIGatewayLambdaProxy
 
         private async Task KeepAlive(int concurrency, string invocationType)
         {
+            _lambda = _lambda ?? new AmazonLambdaClient();
             var tasks = new List<Task<InvokeResponse>>();
             LambdaLogger.Log("Concurrency " + concurrency);
             for (var i = 0; i < concurrency; i++)
