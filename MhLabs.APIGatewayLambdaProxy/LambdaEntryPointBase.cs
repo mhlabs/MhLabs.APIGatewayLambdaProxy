@@ -109,6 +109,10 @@ namespace MhLabs.APIGatewayLambdaProxy
                 correlationId = Guid.NewGuid().ToString();
                 request.Headers[CorrelationHelper.CorrelationIdHeader] = correlationId;
             }
+            else
+            {
+                correlationId = request.Headers[CorrelationHelper.CorrelationIdHeader];
+            }
 
             CorrelationHelper.CorrelationId = correlationId;
         }
