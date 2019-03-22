@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <Version>2.1.7</Version>
+    <Version>2.1.8</Version>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
@@ -12,7 +12,7 @@
     <PackageReference Include="AWSSDK.CodeDeploy" Version="3.3.11.5" />
     <PackageReference Include="awssdk.lambda" Version="3.3.16.2" />
     <PackageReference Include="MhLabs.AwsSignedHttpClient" Version="4.2.5" />
-    <PackageReference Include="MhLabs.Extensions" Version="1.0.1" />
+    <PackageReference Include="MhLabs.Extensions" Version="1.0.3" />
     <PackageReference Include="Newtonsoft.Json" Version="12.0.1" />
   </ItemGroup>
 
