@@ -9,8 +9,6 @@ namespace MhLabs.APIGatewayLambdaProxy
 {
     public class MockStartup
     {
-        private readonly IHostingEnvironment _hostingEnvironment;
-
         public MockStartup(IHostingEnvironment env)
         {
         }

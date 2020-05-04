@@ -50,7 +50,7 @@ namespace MhLabs.APIGatewayLambdaProxy
         protected virtual void UseCorrelationId(string correlationId) { }
         protected override void Init(IWebHostBuilder builder)
         {
-            Initialize(builder);
+            Init(builder);
         }
 
         protected override void PostCreateContext(Microsoft.AspNetCore.Hosting.Internal.HostingApplication.Context context, APIGatewayProxyRequest apiGatewayRequest, ILambdaContext lambdaContext)

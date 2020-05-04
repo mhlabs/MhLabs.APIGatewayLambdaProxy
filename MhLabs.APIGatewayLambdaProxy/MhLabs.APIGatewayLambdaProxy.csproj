@@ -2,18 +2,18 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <Version>2.1.9</Version>
+    <Version>3.0.0</Version>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="1.1.3" />
+    <PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="2.1.0" />
     <PackageReference Include="Amazon.Lambda.AspNetCoreServer" Version="2.1.0" />
-    <PackageReference Include="AWSSDK.CodeDeploy" Version="3.3.11.5" />
+    <PackageReference Include="AWSSDK.CodeDeploy" Version="3.3.101.48" />
     <PackageReference Include="awssdk.lambda" Version="3.3.16.2" />
-    <PackageReference Include="MhLabs.AwsSignedHttpClient" Version="5.2.2" />
-    <PackageReference Include="MhLabs.Extensions" Version="1.0.3" />
-    <PackageReference Include="Newtonsoft.Json" Version="12.0.1" />
+    <PackageReference Include="MhLabs.AwsSignedHttpClient" Version="7.0.0" />
+    <PackageReference Include="MhLabs.Extensions" Version="1.0.5" />
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
   </ItemGroup>
 
 </Project>
