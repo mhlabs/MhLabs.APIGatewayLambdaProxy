@@ -16,7 +16,6 @@ using Amazon.Lambda.Model;
 using MhLabs.AwsSignedHttpClient;
 using MhLabs.Extensions;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http.Features;
 using Newtonsoft.Json;
 
 namespace MhLabs.APIGatewayLambdaProxy
@@ -36,8 +35,8 @@ namespace MhLabs.APIGatewayLambdaProxy
         protected virtual int PreTrafficConcurrency { get; set; } = 1;
         protected LambdaEntryPointBase() : base(string.IsNullOrEmpty(
             System.Environment.GetEnvironmentVariable("PRE_HOOK_TRIGGER"))
-            ? AspNetCoreStartupMode.Constructor
-            : AspNetCoreStartupMode.FirstRequest)
+            ? StartupMode.Constructor
+            : StartupMode.FirstRequest)
         {
         }
 
@@ -50,14 +49,6 @@ namespace MhLabs.APIGatewayLambdaProxy
         protected virtual void UseCorrelationId(string correlationId) { }
         protected override void Init(IWebHostBuilder builder)
         {
-            Init(builder);
-        }
-
-        protected override void PostCreateContext(Microsoft.AspNetCore.Hosting.Internal.HostingApplication.Context context, APIGatewayProxyRequest apiGatewayRequest, ILambdaContext lambdaContext)
-        {
-            var cts = new CancellationTokenSource();
-            cts.CancelAfter((int)(lambdaContext.RemainingTime.TotalMilliseconds * 0.75));
-            context.HttpContext.RequestAborted = cts.Token;
         }
 
         public override async Task<APIGatewayProxyResponse> FunctionHandlerAsync(APIGatewayProxyRequest request, ILambdaContext lambdaContext)
