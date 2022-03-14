@@ -129,7 +129,7 @@ namespace MhLabs.APIGatewayLambdaProxy
             _httpClient = _httpClient ?? new HttpClient(new AwsSignedHttpMessageHandler { InnerHandler = new HttpClientHandler() }) { BaseAddress = Env.Get("ApiBaseUrl").ToUri() };
         }
 
-        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
+        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
         public async Task PreTrafficHook(CodeDeployEvent deployment)
         {
             var status = LifecycleEventStatus.Succeeded;
@@ -187,7 +187,7 @@ namespace MhLabs.APIGatewayLambdaProxy
             await _codeDeploy.PutLifecycleEventHookExecutionStatusAsync(request);
         }
 
-        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
+        [LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
         public async Task PostTrafficHook(CodeDeployEvent deployment)
         {
             var status = LifecycleEventStatus.Succeeded;
