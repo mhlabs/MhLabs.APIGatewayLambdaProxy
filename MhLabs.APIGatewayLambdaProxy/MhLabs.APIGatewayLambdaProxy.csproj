@@ -13,7 +13,7 @@
     <PackageReference Include="awssdk.lambda" Version="3.7.4.9" />
     <PackageReference Include="MhLabs.AwsSignedHttpClient" Version="8.0.0" />
     <PackageReference Include="MhLabs.Extensions" Version="1.0.10" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
   </ItemGroup>
 
 </Project>
